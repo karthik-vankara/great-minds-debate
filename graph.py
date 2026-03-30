@@ -1,3 +1,4 @@
+import os
 from dotenv import load_dotenv
 load_dotenv()  # must run before any ChatOpenAI imports initialise
 
@@ -8,8 +9,9 @@ from state import DebateState
 from personas import PERSONAS
 from router import route_node
 
-_agent_llm = ChatOpenAI(model="gpt-4.1", temperature=0.5)
-_synthesis_llm = ChatOpenAI(model="gpt-4.1", temperature=0.3)
+_debate_model = os.getenv("DEBATE_MODEL", "gpt-4.1")
+_agent_llm = ChatOpenAI(model=_debate_model, temperature=0.5)
+_synthesis_llm = ChatOpenAI(model=_debate_model, temperature=0.3)
 
 
 # ---------------------------------------------------------------------------

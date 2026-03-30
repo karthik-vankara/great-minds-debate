@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
-from rich.text import Text
 
 from graph import app
 from personas import PERSONAS
@@ -11,12 +10,6 @@ from state import DebateState
 load_dotenv()
 
 console = Console()
-
-ROUND_COLORS = {
-    "opening": "bold",
-    "rebuttal": "italic",
-    "closing": "bold italic",
-}
 
 
 def print_agent_panel(agent_key: str, round_name: str, content: str) -> None:
@@ -58,38 +51,88 @@ def run_debate(user_input: str, chat_history: list) -> list:
         "synthesis": "",
     }
 
-    console.print(Rule("[dim]Running debate...[/dim]"))
-    result = app.invoke(initial_state)
+    # Track which round headers have already been printed
+    printed_headers: set[str] = set()
+    # Accumulate full state so chat_history can be updated at the end
+    result: dict = {}
 
-    # Print routing header
-    print_routing_header(result)
+    ROUND_HEADERS = {
+        "agent_1_opening":  ("round1", "[bold]Round 1 — Opening Statements[/bold]"),
+        "agent_2_opening":  ("round1", "[bold]Round 1 — Opening Statements[/bold]"),
+        "agent_1_rebuttal": ("round2", "[bold]Round 2 — Rebuttals[/bold]"),
+        "agent_2_rebuttal": ("round2", "[bold]Round 2 — Rebuttals[/bold]"),
+        "agent_1_closing":  ("round3", "[bold]Round 3 — Closing Arguments[/bold]"),
+        "agent_2_closing":  ("round3", "[bold]Round 3 — Closing Arguments[/bold]"),
+    }
 
-    a1 = result["agent_1"]
-    a2 = result["agent_2"]
+    NODE_LABELS = {
+        "route":            "🔍 Routing to best agents...",
+        "agent_1_opening":  "💬 Waiting for opening statement...",
+        "agent_2_opening":  "💬 Waiting for opening statement...",
+        "agent_1_rebuttal": "⚔️  Preparing rebuttal...",
+        "agent_2_rebuttal": "⚔️  Preparing rebuttal...",
+        "agent_1_closing":  "🎤 Preparing closing argument...",
+        "agent_2_closing":  "🎤 Preparing closing argument...",
+        "synthesis":        "🧠 Synthesizing debate...",
+    }
 
-    # Round 1 — Openings
-    console.print(Rule("[bold]Round 1 — Opening Statements[/bold]"))
-    print_agent_panel(a1, "opening", result["agent_1_opening"])
-    print_agent_panel(a2, "opening", result["agent_2_opening"])
+    console.print(Rule("[dim]Debate starting...[/dim]"))
 
-    # Round 2 — Rebuttals
-    console.print(Rule("[bold]Round 2 — Rebuttals[/bold]"))
-    print_agent_panel(a1, "rebuttal", result["agent_1_rebuttal"])
-    print_agent_panel(a2, "rebuttal", result["agent_2_rebuttal"])
+    with console.status("", spinner="dots") as status:
+        # Show spinner label for first node before streaming begins
+        status.update(f"[dim]{NODE_LABELS['route']}[/dim]")
 
-    # Round 3 — Closing Arguments
-    console.print(Rule("[bold]Round 3 — Closing Arguments[/bold]"))
-    print_agent_panel(a1, "closing", result["agent_1_closing"])
-    print_agent_panel(a2, "closing", result["agent_2_closing"])
+        for event in app.stream(initial_state, stream_mode="updates"):
+            for node_name, node_output in event.items():
+                # Merge into accumulated result
+                result.update(node_output)
 
-    # Synthesis
-    console.print(Rule("[bold green]Synthesis[/bold green]"))
-    console.print(Panel(result["synthesis"], title="[bold green]🧠 MODERATOR SYNTHESIS[/bold green]", border_style="green"))
+                # Stop spinner so panel prints cleanly
+                status.stop()
+
+                if node_name == "route":
+                    # Routing done — print header immediately
+                    print_routing_header(result)
+
+                elif node_name in ROUND_HEADERS:
+                    round_key, round_label = ROUND_HEADERS[node_name]
+                    if round_key not in printed_headers:
+                        console.print(Rule(round_label))
+                        printed_headers.add(round_key)
+
+                    # Determine which agent key and round name to display
+                    agent_slot, round_name = node_name.rsplit("_", 1)  # e.g. agent_1, opening
+                    agent_key = result.get(agent_slot)  # "steve_jobs", "elon_musk", etc.
+                    if agent_key:
+                        print_agent_panel(agent_key, round_name, node_output[node_name])
+
+                elif node_name == "synthesis":
+                    console.print(Rule("[bold green]Synthesis[/bold green]"))
+                    console.print(Panel(
+                        node_output["synthesis"],
+                        title="[bold green]🧠 MODERATOR SYNTHESIS[/bold green]",
+                        border_style="green",
+                    ))
+
+                # Determine next expected node label for the spinner
+                next_nodes = {
+                    "route":            "agent_1_opening",
+                    "agent_1_opening":  "agent_2_opening",
+                    "agent_2_opening":  "agent_1_rebuttal",
+                    "agent_1_rebuttal": "agent_2_rebuttal",
+                    "agent_2_rebuttal": "agent_1_closing",
+                    "agent_1_closing":  "agent_2_closing",
+                    "agent_2_closing":  "synthesis",
+                }
+                next_node = next_nodes.get(node_name)
+                if next_node:
+                    status.update(f"[dim]{NODE_LABELS[next_node]}[/dim]")
+                    status.start()
 
     # Update chat history with this exchange
     updated_history = list(chat_history) + [
         {"role": "user", "content": user_input},
-        {"role": "assistant", "content": result["synthesis"]},
+        {"role": "assistant", "content": result.get("synthesis", "")},
     ]
     return updated_history
 

@@ -1,3 +1,4 @@
+import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -15,7 +16,8 @@ class RouterOutput(BaseModel):
     routing_reason: str = Field(description="One sentence explaining why these two agents were chosen")
 
 
-_router_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(RouterOutput)
+_router_model = os.getenv("ROUTER_MODEL", "gpt-4o-mini")
+_router_llm = ChatOpenAI(model=_router_model, temperature=0).with_structured_output(RouterOutput)
 
 _AGENT_SUMMARY = "\n".join(
     f"- {key}: {data['display_name']} — expertise in: {', '.join(data['tags'][:6])}"
