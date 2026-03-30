@@ -1,0 +1,46 @@
+# Environment variables — never commit your API keys
+.env
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Distribution / build
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Pytest / test cache
+.pytest_cache/
+.cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code
+.vscode/
+
+# Jupyter (if added later)
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs
+*.log
+
+# LangGraph / LangSmith tracing (if enabled)
+.langchain.db
+langchain.db
