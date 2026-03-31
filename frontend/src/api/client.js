@@ -72,3 +72,94 @@ export async function deleteSession(name) {
     method: "DELETE",
   });
 }
+
+export async function streamDebate(body, onEvent, onError) {
+  /**
+   * Stream debate updates via Server-Sent Events (SSE).
+   * Uses fetch with streaming Response to handle event stream.
+   * 
+   * @param {Object} body - DebateRequest payload
+   * @param {Function} onEvent - Callback called for each event: (eventData) => void
+   * @param {Function} onError - Callback called on error: (error) => void
+   * @returns {Function} Unsubscribe function to close the stream
+   */
+  let isAborted = false;
+  let reader = null;
+  
+  try {
+    const response = await fetch(`${API_BASE}/debates/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      let detail = `Stream failed (${response.status})`;
+      try {
+        const payload = JSON.parse(text);
+        detail = payload?.detail || detail;
+      } catch {}
+      throw new Error(detail);
+    }
+
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const processStream = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || isAborted) {
+            if (!isAborted) {
+              onEvent({ node: "stream_complete" });
+            }
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          
+          // Keep the last incomplete line in buffer
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const jsonStr = line.slice(6); // Remove "data: " prefix
+                const data = JSON.parse(jsonStr);
+                if (!isAborted) {
+                  onEvent(data);
+                }
+              } catch (err) {
+                if (!isAborted) {
+                  onError(new Error(`Failed to parse SSE event: ${err.message}`));
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (!isAborted) {
+          onError(err);
+        }
+      }
+    };
+
+    processStream().catch(() => {
+      // Stream processing error already handled in processStream
+    });
+
+    // Return unsubscribe/cleanup function
+    return () => {
+      isAborted = true;
+      if (reader) {
+        reader.cancel().catch(() => {});
+      }
+    };
+  } catch (err) {
+    onError(err);
+    return () => {}; // No-op cleanup
+  }
+}

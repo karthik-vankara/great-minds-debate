@@ -125,9 +125,9 @@ Current API groups:
 - `/api/personas` - list/create/delete personas
 - `/api/sessions` - list/save/load/delete sessions
 
-## Running The UI (Phase 4)
+## Running The UI (Phase 4 + Phase 5)
 
-The React + Vite frontend is in `frontend/`.
+The React + Vite frontend is in `frontend/` with **full streaming support** for incremental debate display.
 
 ```bash
 cd frontend
@@ -135,17 +135,33 @@ npm install
 npm run dev
 ```
 
+The UI displays:
+- **Debate control form** with session management and persona selection (auto/manual modes)
+- **Live streaming progress** showing current node being processed as debate executes
+- **Debate transcript** with routing details, all three rounds (opening/rebuttal/closing), and synthesis
+- **Session history** panel showing prior turns in the conversation
+- **Sessions panel** with load/delete actions for saved debates
+- **Personas panel** with full CRUD for custom personas
+
 Optional API base override:
 
 ```bash
 VITE_API_BASE=http://127.0.0.1:8000/api npm run dev
 ```
 
-You'll see the welcome banner and a prompt:
+### Phase 5 Streaming Updates
 
-```
-You: Should I quit my job and start a startup?
-```
+The `/api/debates/stream` endpoint provides real-time debate updates via Server-Sent Events (SSE):
+
+- Each node completion sends an event with current output and accumulated state
+- UI updates incrementally showing routing, opening statements, rebuttals, closing, and synthesis as they complete
+- Progress bar and node badges show which debate stages have been processed
+- Final event signals completion and session save status
+
+On the frontend:
+- `streamDebate(payload, onEvent, onError)` in `api/client.js` handles SSE parsing and event callbacks
+- `handleRunDebate()` in `App.jsx` wires streaming to component state for live progress display
+- CSS animations provide visual feedback during streaming with shimmer effects and badge transitions
 
 ## Example Interaction
 
@@ -242,3 +258,43 @@ When a named session is loaded, each new debate turn auto-saves back to that ses
 Persona persistence is implemented through a repository abstraction in `personas.py`.
 This makes it straightforward to swap the JSON backend with a database backend later
 without changing router/graph debate orchestration.
+
+## UI Polish & Design Features (Phase 5)
+
+### Visual Hierarchy & Typography
+- **Space Grotesk** font family for clear, modern typography
+- **Distinct heading weights** (h2: 700, labels: 500) for visual navigation
+- **Color system** with CSS custom properties for consistent branding across light/dark contexts
+- **Responsive grid layout** (12-column) that adapts from desktop (4/8 col splits) to tablet (full 12) to mobile (stacked)
+
+### Interactive Feedback
+- **Button hover states** with lift effect (`translateY(-2px)`) and shadow growth
+- **Input focus rings** with brand color and subtle glow (`box-shadow: 0 0 0 3px rgba(...)`)
+- **Label color transitions** that match focused input field color (`label:has(input:focus)`)
+- **Form field hover** with border color change for clearer interaction affordance
+
+### Streaming Progress Visualization
+- **Animated progress bar** with continuous shimmer effect showing debate execution
+- **Node badges** displaying completed stages (Router, Opening, Rebuttal, Closing, Synthesis)
+- **Live status text** updating as each node processes ("Initializing → Router → Opening Round..." → "Debate Complete ✓")
+- **Min-height panel** ensures layout stability during progress display
+
+### Error & State Handling
+- **Error banner** with gradient background, slide-down animation, and danger color (#8e2931)
+- **Loading state** with disabled form inputs and "Running..." button text
+- **Disabled form fields** during API execution with visual opacity reduction
+- **Session auto-persistence** with optional success feedback
+
+### Animations & Polish
+- **Panel reveal** animation (450ms ease-out) on mount for smooth page entrance
+- **Error slide-down** (300ms ease-out) providing notice without jarring appearance
+- **Shimmer progress bar** (2s loop) conveying ongoing work during debate execution
+- **Hover transitions** across list items (200ms) for smooth interactive feedback
+- **Button ripple effect** (via `::before` pseudo-element) on click for tactile feedback
+
+### Accessibility Enhancements
+- **Focus visible** on all interactive elements with 3px colored rings
+- **Disabled attribute** applied to form elements during async operations
+- **Semantic HTML** labels properly associated with inputs for screen readers
+- **Color contrast** verified across all states (text: AA/AAA compliance intended)
+- **Keyboard navigation** fully supported across form, buttons, and list items

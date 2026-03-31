@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   deletePersona,
@@ -7,7 +7,7 @@ import {
   listPersonas,
   listSessions,
   loadSession,
-  runDebate,
+  streamDebate,
   saveSession,
   upsertPersona,
 } from "./api/client";
@@ -19,7 +19,7 @@ function normalizeError(error) {
 function DebateTranscript({ result, personasByKey }) {
   if (!result || !result.synthesis) {
     return (
-      <div className="panel empty">
+      <div className="panel debate-transcript empty">
         <h3>Latest Debate</h3>
         <p>Run a debate to view routing details, round outputs, and synthesis.</p>
       </div>
@@ -100,6 +100,8 @@ export default function App() {
   const [apiStatus, setApiStatus] = useState("checking");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [streamProgress, setStreamProgress] = useState(null); // null={idle}, {currentNode, allNodes: []}
+  const unsubscribeRef = useRef(null);
 
   const [question, setQuestion] = useState("");
   const [selectionMode, setSelectionMode] = useState("auto");
@@ -169,26 +171,84 @@ export default function App() {
 
     try {
       setBusy(true);
-      const response = await runDebate({
+      setStreamProgress({ currentNode: "Initializing...", allNodes: [] });
+
+      // Cleanup any previous subscription
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+
+      const debatePayload = {
         user_input: question.trim(),
         chat_history: chatHistory,
         selection_mode: selectionMode,
         selected_agents: selectionMode === "manual" ? selectedAgents : [],
         session_name: sessionName.trim() || null,
-      });
+      };
 
-      setLastResult(response.result);
-      setChatHistory(response.chat_history || []);
-      setQuestion("");
+      let finalResult = null;
 
-      if (response.saved_session_name) {
-        setSessionName(response.saved_session_name);
-      }
-      await refreshCoreData();
+      const unsubscribe = await streamDebate(
+        debatePayload,
+        (event) => {
+          if (event.node === "error") {
+            setError(event.error || "Streaming error occurred");
+            setBusy(false);
+            setStreamProgress(null);
+          } else if (event.node === "session_save_error") {
+            setError(event.error || "Session save failed");
+            setBusy(false);
+            setStreamProgress(null);
+          } else if (event.node === "completion") {
+            // Save session name if returned, and update chat history
+            if (event.saved_session_name) {
+              setSessionName(event.saved_session_name);
+            }
+            if (event.chat_history) {
+              setChatHistory(event.chat_history);
+            }
+            // Display completion message
+            setStreamProgress((prev) => ({
+              ...prev,
+              currentNode: "Debate Complete ✓",
+            }));
+            setBusy(false);
+            setTimeout(() => {
+              setStreamProgress(null);
+              setQuestion("");
+              refreshCoreData();
+            }, 500);
+          } else if (event.node === "stream_complete") {
+            // Stream ended, waiting for final processing
+            setStreamProgress((prev) => ({
+              ...prev,
+              currentNode: "Finalizing...",
+            }));
+          } else if (event.result) {
+            // Regular debate event
+            finalResult = event.result;
+            setLastResult(event.result);
+            setStreamProgress((prev) => ({
+              currentNode: event.node,
+              allNodes: Array.from(
+                new Set([...(prev?.allNodes || []), event.node])
+              ),
+            }));
+          }
+        },
+        (error) => {
+          setError(normalizeError(error));
+          setBusy(false);
+          setStreamProgress(null);
+        }
+      );
+
+      unsubscribeRef.current = unsubscribe;
     } catch (err) {
       setError(normalizeError(err));
-    } finally {
       setBusy(false);
+      setStreamProgress(null);
     }
   }
 
@@ -300,6 +360,23 @@ export default function App() {
     }
   }
 
+  function handleEditPersona(persona) {
+    setPersonaKey(persona.key);
+    setPersonaName(persona.data.display_name);
+    setPersonaColor(persona.data.color || "bold white");
+    setPersonaTags(persona.data.tags.join(", "));
+    setPersonaPrompt(persona.data.system_prompt);
+    setError("");
+  }
+
+  function handleClearPersonaForm() {
+    setPersonaKey("");
+    setPersonaName("");
+    setPersonaColor("bold white");
+    setPersonaTags("");
+    setPersonaPrompt("");
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -319,7 +396,7 @@ export default function App() {
         <section className="panel debate-control">
           <div className="panel-head">
             <h2>Debate</h2>
-            <span className="chip">Non-streaming v1</span>
+            <span className="chip">Streaming enabled</span>
           </div>
 
           <form onSubmit={handleRunDebate}>
@@ -329,12 +406,13 @@ export default function App() {
                 value={sessionName}
                 onChange={(event) => setSessionName(event.target.value)}
                 placeholder="session_20260331"
+                disabled={busy}
               />
             </label>
 
             <label>
               Selection mode
-              <select value={selectionMode} onChange={(event) => setSelectionMode(event.target.value)}>
+              <select value={selectionMode} onChange={(event) => setSelectionMode(event.target.value)} disabled={busy}>
                 <option value="auto">auto</option>
                 <option value="manual">manual</option>
               </select>
@@ -344,7 +422,7 @@ export default function App() {
               <div className="manual-grid">
                 <label>
                   Persona 1
-                  <select value={selectedAgent1} onChange={(event) => setSelectedAgent1(event.target.value)}>
+                  <select value={selectedAgent1} onChange={(event) => setSelectedAgent1(event.target.value)} disabled={busy}>
                     <option value="">Select persona</option>
                     {personaKeys.map((key) => (
                       <option key={key} value={key}>{key}</option>
@@ -353,7 +431,7 @@ export default function App() {
                 </label>
                 <label>
                   Persona 2
-                  <select value={selectedAgent2} onChange={(event) => setSelectedAgent2(event.target.value)}>
+                  <select value={selectedAgent2} onChange={(event) => setSelectedAgent2(event.target.value)} disabled={busy}>
                     <option value="">Select persona</option>
                     {personaKeys.map((key) => (
                       <option key={key} value={key}>{key}</option>
@@ -370,8 +448,29 @@ export default function App() {
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
                 placeholder="Should we prioritize Mars colonization over Earth climate resilience?"
+                disabled={busy}
               />
             </label>
+
+            {streamProgress ? (
+              <div className="stream-progress">
+                <div className="progress-bar-container">
+                  <div className="progress-bar-fill"></div>
+                </div>
+                <p className="progress-text">
+                  {streamProgress.currentNode}
+                </p>
+                {streamProgress.allNodes.length > 0 && (
+                  <div className="progress-nodes">
+                    {streamProgress.allNodes.map((node) => (
+                      <span key={node} className="node-badge">
+                        {node.replace(/_/g, " ")}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             <div className="button-row">
               <button type="submit" disabled={busy}>{busy ? "Running..." : "Run Debate"}</button>
@@ -413,29 +512,51 @@ export default function App() {
               <li key={persona.key}>
                 <div>
                   <strong>{persona.key}</strong>
-                  <p>{persona.data.display_name} · {persona.origin}</p>
+                  <p>{persona.data.display_name} · <span className="origin-badge">{persona.origin}</span></p>
                 </div>
-                {persona.origin === "custom" ? (
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={busy}
-                    onClick={() => handleDeletePersona(persona.key)}
-                  >
-                    Delete
-                  </button>
-                ) : (
-                  <span className="chip">built-in</span>
-                )}
+                <div className="row-actions">
+                  {persona.origin === "custom" && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={busy}
+                      onClick={() => handleEditPersona(persona)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {persona.origin === "custom" ? (
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={busy}
+                      onClick={() => handleDeletePersona(persona.key)}
+                    >
+                      Delete
+                    </button>
+                  ) : (
+                    <span className="chip">built-in</span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
 
           <form className="persona-form" onSubmit={handleSavePersona}>
-            <h3>Add or Update Custom Persona</h3>
+            <h3>{personaKey ? "Update Custom Persona" : "Create New Persona"}</h3>
+            <p className="form-hint">
+              {personaKey 
+                ? `Editing "${personaKey}" — modify fields and click Save to update.`
+                : "Enter a unique key (snake_case) and fill in all fields to create a new persona."}
+            </p>
             <label>
               Key (snake_case)
-              <input value={personaKey} onChange={(event) => setPersonaKey(event.target.value)} />
+              <input 
+                value={personaKey} 
+                onChange={(event) => setPersonaKey(event.target.value)} 
+                placeholder="my_philosopher"
+                disabled={personaKey && personas.some(p => p.key === personaKey && p.origin === "custom") ? false : false}
+              />
             </label>
             <label>
               Display name
@@ -453,7 +574,19 @@ export default function App() {
               System prompt
               <textarea rows={4} value={personaPrompt} onChange={(event) => setPersonaPrompt(event.target.value)} />
             </label>
-            <button type="submit" disabled={busy}>Save Persona</button>
+            <div className="button-row">
+              <button type="submit" disabled={busy}>{personaKey ? "Update Persona" : "Create Persona"}</button>
+              {personaKey && (
+                <button 
+                  type="button" 
+                  className="ghost" 
+                  disabled={busy}
+                  onClick={handleClearPersonaForm}
+                >
+                  Clear Form
+                </button>
+              )}
+            </div>
           </form>
         </section>
       </main>
