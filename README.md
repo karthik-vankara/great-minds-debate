@@ -35,7 +35,7 @@ User Question
 
 - **Router model**: `gpt-4o-mini` (cheap, classification only)
 - **Debate model**: `gpt-4.1` (quality persona responses)
-- **Session memory**: full chat history is carried across questions
+- **Session memory**: recent conversation context is injected into routing and debate prompts
 
 ## Project Structure
 
@@ -97,6 +97,48 @@ All checks passed. Run `python main.py` to start the debate arena.
 
 ```bash
 python main.py
+```
+
+## Running The API (Phase 2)
+
+You can now run the backend API for UI integration:
+
+```bash
+python3 -m uvicorn backend.main:app --reload
+```
+
+If you are using the project virtual environment directly:
+
+```bash
+.venv/bin/python -m uvicorn backend.main:app --reload
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+Current API groups:
+
+- `/api/debates` - run debates from non-CLI clients
+- `/api/personas` - list/create/delete personas
+- `/api/sessions` - list/save/load/delete sessions
+
+## Running The UI (Phase 4)
+
+The React + Vite frontend is in `frontend/`.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Optional API base override:
+
+```bash
+VITE_API_BASE=http://127.0.0.1:8000/api npm run dev
 ```
 
 You'll see the welcome banner and a prompt:

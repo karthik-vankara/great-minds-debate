@@ -5,6 +5,7 @@ load_dotenv()  # must run before any ChatOpenAI imports initialise
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 
+from core.prompting import build_recent_chat_context
 from state import DebateState
 from personas import PERSONAS
 from router import route_node
@@ -27,21 +28,28 @@ def _agent_invoke_from_state(state: DebateState, agent_key: str, prompt: str) ->
     return response.content.strip()
 
 
+def _context_block(state: DebateState) -> str:
+    context = build_recent_chat_context(state.get("chat_history"))
+    return "" if not context else f"{context}\n\n"
+
+
 # ---------------------------------------------------------------------------
 # Debate nodes
 # ---------------------------------------------------------------------------
 
 def agent_1_opening_node(state: DebateState) -> dict:
+    context = _context_block(state)
     prompt = (
-        f"The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
+        f"{context}The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
     )
     return {"agent_1_opening": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
 def agent_2_opening_node(state: DebateState) -> dict:
+    context = _context_block(state)
     prompt = (
-        f"The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
+        f"{context}The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
     )
     return {"agent_2_opening": _agent_invoke_from_state(state, state["agent_2"], prompt)}
@@ -50,8 +58,9 @@ def agent_2_opening_node(state: DebateState) -> dict:
 def agent_1_rebuttal_node(state: DebateState) -> dict:
     active_personas = _active_personas(state)
     opponent = active_personas[state["agent_2"]]["display_name"]
+    context = _context_block(state)
     prompt = (
-        f"Topic: \"{state['user_input']}\"\n\n"
+        f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_2_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
     )
@@ -61,8 +70,9 @@ def agent_1_rebuttal_node(state: DebateState) -> dict:
 def agent_2_rebuttal_node(state: DebateState) -> dict:
     active_personas = _active_personas(state)
     opponent = active_personas[state["agent_1"]]["display_name"]
+    context = _context_block(state)
     prompt = (
-        f"Topic: \"{state['user_input']}\"\n\n"
+        f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_1_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
     )
@@ -72,8 +82,9 @@ def agent_2_rebuttal_node(state: DebateState) -> dict:
 def agent_1_closing_node(state: DebateState) -> dict:
     active_personas = _active_personas(state)
     opponent = active_personas[state["agent_2"]]["display_name"]
+    context = _context_block(state)
     prompt = (
-        f"Topic: \"{state['user_input']}\"\n\n"
+        f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"The debate so far:\n"
         f"Your opening: \"{state['agent_1_opening']}\"\n"
         f"{opponent}'s rebuttal: \"{state['agent_2_rebuttal']}\"\n\n"
@@ -85,8 +96,9 @@ def agent_1_closing_node(state: DebateState) -> dict:
 def agent_2_closing_node(state: DebateState) -> dict:
     active_personas = _active_personas(state)
     opponent = active_personas[state["agent_1"]]["display_name"]
+    context = _context_block(state)
     prompt = (
-        f"Topic: \"{state['user_input']}\"\n\n"
+        f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"The debate so far:\n"
         f"Your opening: \"{state['agent_2_opening']}\"\n"
         f"{opponent}'s rebuttal: \"{state['agent_1_rebuttal']}\"\n\n"
@@ -99,8 +111,10 @@ def synthesis_node(state: DebateState) -> dict:
     active_personas = _active_personas(state)
     a1 = active_personas[state["agent_1"]]["display_name"]
     a2 = active_personas[state["agent_2"]]["display_name"]
+    context = _context_block(state)
     prompt = (
         f"You are a neutral debate moderator. Summarize the following debate on the topic:\n"
+        f"{context}"
         f"\"{state['user_input']}\"\n\n"
         f"--- {a1} ---\n"
         f"Opening: {state['agent_1_opening']}\n"

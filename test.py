@@ -10,6 +10,8 @@ def test_imports():
     from personas import PERSONAS, AGENT_KEYS
     from router import route_node
     from graph import app
+    from core.prompting import build_recent_chat_context
+    from core.orchestration import run_debate_orchestration
     print("[OK] All modules imported successfully.")
     print(f"[OK] Agents available: {', '.join(AGENT_KEYS)}")
 
