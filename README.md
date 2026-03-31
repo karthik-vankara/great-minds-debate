@@ -163,6 +163,7 @@ The app now supports custom personas with JSON persistence and two debate modes:
 ### CLI Commands
 
 - `/personas` opens the persona manager (`list`, `add`, `edit`, `delete`, `back`)
+- `/sessions` opens the session manager (`list`, `save`, `load`, `delete`, `back`)
 - `/mode` switches between `auto` and `manual`
 - `/help` shows command help
 
@@ -175,6 +176,14 @@ Custom personas are stored in:
 ```
 
 Built-in personas remain immutable defaults. Custom personas are overlaid on top of built-ins.
+
+Session history is stored in:
+
+```
+.debate_arena/sessions/
+```
+
+When a named session is loaded, each new debate turn auto-saves back to that session file.
 
 ### Future DB Extension
 
