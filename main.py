@@ -4,7 +4,13 @@ from rich.panel import Panel
 from rich.rule import Rule
 
 from graph import app
-from personas import PERSONAS
+from personas import (
+    BUILTIN_PERSONAS,
+    get_active_personas,
+    refresh_personas,
+    remove_custom_persona,
+    save_custom_persona,
+)
 from state import DebateState
 
 load_dotenv()
@@ -12,16 +18,16 @@ load_dotenv()
 console = Console()
 
 
-def print_agent_panel(agent_key: str, round_name: str, content: str) -> None:
-    persona = PERSONAS[agent_key]
+def print_agent_panel(agent_key: str, round_name: str, content: str, persona_pool: dict[str, dict]) -> None:
+    persona = persona_pool[agent_key]
     color = persona["color"]
     title = f"[{color}]{persona['display_name']}[/{color}] — {round_name.upper()}"
     console.print(Panel(content, title=title, border_style=color.split()[-1]))
 
 
-def print_routing_header(state: dict) -> None:
-    a1_name = PERSONAS[state["agent_1"]]["display_name"]
-    a2_name = PERSONAS[state["agent_2"]]["display_name"]
+def print_routing_header(state: dict, persona_pool: dict[str, dict]) -> None:
+    a1_name = persona_pool[state["agent_1"]]["display_name"]
+    a2_name = persona_pool[state["agent_2"]]["display_name"]
     a1_pct = int(state["agent_1_confidence"] * 100)
     a2_pct = int(state["agent_2_confidence"] * 100)
 
@@ -33,7 +39,8 @@ def print_routing_header(state: dict) -> None:
     console.print(Panel(content, title="[bold white]🎯 ROUTER[/bold white]", border_style="white"))
 
 
-def run_debate(user_input: str, chat_history: list) -> list:
+def run_debate(user_input: str, chat_history: list, selection_mode: str = "auto", selected_agents: list[str] | None = None) -> list:
+    active_personas = get_active_personas()
     initial_state: DebateState = {
         "user_input": user_input,
         "chat_history": chat_history,
@@ -49,6 +56,9 @@ def run_debate(user_input: str, chat_history: list) -> list:
         "agent_1_closing": "",
         "agent_2_closing": "",
         "synthesis": "",
+        "available_personas": active_personas,
+        "selection_mode": selection_mode,
+        "selected_agents": selected_agents or [],
     }
 
     # Track which round headers have already been printed
@@ -92,7 +102,7 @@ def run_debate(user_input: str, chat_history: list) -> list:
 
                 if node_name == "route":
                     # Routing done — print header immediately
-                    print_routing_header(result)
+                    print_routing_header(result, active_personas)
 
                 elif node_name in ROUND_HEADERS:
                     round_key, round_label = ROUND_HEADERS[node_name]
@@ -104,7 +114,7 @@ def run_debate(user_input: str, chat_history: list) -> list:
                     agent_slot, round_name = node_name.rsplit("_", 1)  # e.g. agent_1, opening
                     agent_key = result.get(agent_slot)  # "steve_jobs", "elon_musk", etc.
                     if agent_key:
-                        print_agent_panel(agent_key, round_name, node_output[node_name])
+                        print_agent_panel(agent_key, round_name, node_output[node_name], active_personas)
 
                 elif node_name == "synthesis":
                     console.print(Rule("[bold green]Synthesis[/bold green]"))
@@ -142,12 +152,111 @@ def main():
         "[bold]Welcome to the AI Persona Debate Arena![/bold]\n\n"
         "Ask any idea or question and watch [cyan]Steve Jobs[/cyan], [yellow]Elon Musk[/yellow], "
         "[green]Einstein[/green], and [blue]Zuckerberg[/blue] debate it.\n\n"
+        "Commands: [bold]/personas[/bold], [bold]/mode[/bold], [bold]/help[/bold].\n"
         "Type [bold red]quit[/bold red] or [bold red]exit[/bold red] to stop.",
         title="[bold magenta]🎤 DEBATE ARENA[/bold magenta]",
         border_style="magenta",
     ))
 
     chat_history: list = []
+    selection_mode = "auto"
+
+    def print_help() -> None:
+        console.print(Panel(
+            "[bold]/personas[/bold] Manage personas (list/add/edit/delete)\n"
+            "[bold]/mode[/bold] Switch between auto and manual selection\n"
+            "[bold]/help[/bold] Show this help",
+            title="[bold white]Commands[/bold white]",
+            border_style="white",
+        ))
+
+    def list_personas() -> None:
+        active = get_active_personas()
+        lines = []
+        for key, data in active.items():
+            origin = "built-in" if key in BUILTIN_PERSONAS else "custom"
+            lines.append(f"[bold]{key}[/bold] ({origin}) - {data['display_name']}")
+        console.print(Panel("\n".join(lines), title="[bold white]Personas[/bold white]", border_style="white"))
+
+    def prompt_persona_payload(existing: dict | None = None) -> dict:
+        existing = existing or {}
+        display_name = console.input(f"Display name [{existing.get('display_name', '')}]: ").strip() or existing.get("display_name", "")
+        color = console.input(f"Color [{existing.get('color', 'bold white')}]: ").strip() or existing.get("color", "bold white")
+        tags_input = console.input(
+            f"Tags comma-separated [{', '.join(existing.get('tags', []))}]: "
+        ).strip()
+        system_prompt = console.input("System prompt: ").strip() or existing.get("system_prompt", "")
+        tags = [tag.strip() for tag in tags_input.split(",") if tag.strip()] if tags_input else existing.get("tags", [])
+        return {
+            "display_name": display_name,
+            "color": color,
+            "tags": tags,
+            "system_prompt": system_prompt,
+        }
+
+    def manage_personas() -> None:
+        while True:
+            console.print("\n[bold]Persona Manager[/bold] - choose: list, add, edit, delete, back")
+            action = console.input("persona> ").strip().lower()
+            if action == "back":
+                return
+            if action == "list":
+                list_personas()
+                continue
+            if action == "add":
+                key = console.input("New persona key (snake_case): ").strip().lower()
+                if not key:
+                    console.print("[yellow]Persona key is required.[/yellow]")
+                    continue
+                payload = prompt_persona_payload()
+                try:
+                    save_custom_persona(key, payload)
+                    console.print(f"[green]Saved custom persona:[/green] {key}")
+                except Exception as exc:
+                    console.print(f"[bold red]Failed to save persona:[/bold red] {exc}")
+                continue
+            if action == "edit":
+                key = console.input("Persona key to edit: ").strip().lower()
+                active = get_active_personas()
+                if key in BUILTIN_PERSONAS:
+                    console.print("[yellow]Built-in personas are immutable. Create a new custom key instead.[/yellow]")
+                    continue
+                if key not in active:
+                    console.print("[yellow]Persona not found.[/yellow]")
+                    continue
+                payload = prompt_persona_payload(active[key])
+                try:
+                    save_custom_persona(key, payload)
+                    console.print(f"[green]Updated custom persona:[/green] {key}")
+                except Exception as exc:
+                    console.print(f"[bold red]Failed to update persona:[/bold red] {exc}")
+                continue
+            if action == "delete":
+                key = console.input("Persona key to delete: ").strip().lower()
+                if key in BUILTIN_PERSONAS:
+                    console.print("[yellow]Cannot delete built-in persona.[/yellow]")
+                    continue
+                deleted = remove_custom_persona(key)
+                if deleted:
+                    console.print(f"[green]Deleted custom persona:[/green] {key}")
+                else:
+                    console.print("[yellow]Persona not found.[/yellow]")
+                continue
+            console.print("[yellow]Unknown action. Use list, add, edit, delete, or back.[/yellow]")
+
+    def choose_manual_agents() -> list[str] | None:
+        active = get_active_personas()
+        keys = list(active.keys())
+        if len(keys) < 2:
+            console.print("[bold red]Need at least two personas to run a debate.[/bold red]")
+            return None
+        list_personas()
+        first = console.input("Manual agent 1 key: ").strip()
+        second = console.input("Manual agent 2 key: ").strip()
+        if first not in active or second not in active or first == second:
+            console.print("[bold red]Invalid manual selection. Please choose two distinct valid keys.[/bold red]")
+            return None
+        return [first, second]
 
     while True:
         console.print()
@@ -164,8 +273,34 @@ def main():
             console.print("[bold]Goodbye! 👋[/bold]")
             break
 
+        if user_input == "/help":
+            print_help()
+            continue
+
+        if user_input == "/personas":
+            manage_personas()
+            refresh_personas()
+            continue
+
+        if user_input == "/mode":
+            mode = console.input("Choose mode (auto/manual): ").strip().lower()
+            if mode in {"auto", "manual"}:
+                selection_mode = mode
+                console.print(f"[green]Selection mode set to:[/green] {selection_mode}")
+            else:
+                console.print("[yellow]Invalid mode. Use auto or manual.[/yellow]")
+            continue
+
         try:
-            chat_history = run_debate(user_input, chat_history)
+            selected_agents = choose_manual_agents() if selection_mode == "manual" else None
+            if selection_mode == "manual" and not selected_agents:
+                continue
+            chat_history = run_debate(
+                user_input,
+                chat_history,
+                selection_mode=selection_mode,
+                selected_agents=selected_agents,
+            )
         except Exception as e:
             console.print(f"[bold red]Error:[/bold red] {e}")
 

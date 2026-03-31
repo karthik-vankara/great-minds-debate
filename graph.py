@@ -14,12 +14,12 @@ _agent_llm = ChatOpenAI(model=_debate_model, temperature=0.5)
 _synthesis_llm = ChatOpenAI(model=_debate_model, temperature=0.3)
 
 
-# ---------------------------------------------------------------------------
-# Helper: invoke a persona with a prompt
-# ---------------------------------------------------------------------------
+def _active_personas(state: DebateState) -> dict[str, dict]:
+    return state.get("available_personas") or PERSONAS
 
-def _agent_invoke(agent_key: str, prompt: str) -> str:
-    persona = PERSONAS[agent_key]
+
+def _agent_invoke_from_state(state: DebateState, agent_key: str, prompt: str) -> str:
+    persona = _active_personas(state)[agent_key]
     response = _agent_llm.invoke([
         {"role": "system", "content": persona["system_prompt"]},
         {"role": "user", "content": prompt},
@@ -36,7 +36,7 @@ def agent_1_opening_node(state: DebateState) -> dict:
         f"The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
     )
-    return {"agent_1_opening": _agent_invoke(state["agent_1"], prompt)}
+    return {"agent_1_opening": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
 def agent_2_opening_node(state: DebateState) -> dict:
@@ -44,31 +44,34 @@ def agent_2_opening_node(state: DebateState) -> dict:
         f"The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
     )
-    return {"agent_2_opening": _agent_invoke(state["agent_2"], prompt)}
+    return {"agent_2_opening": _agent_invoke_from_state(state, state["agent_2"], prompt)}
 
 
 def agent_1_rebuttal_node(state: DebateState) -> dict:
-    opponent = PERSONAS[state["agent_2"]]["display_name"]
+    active_personas = _active_personas(state)
+    opponent = active_personas[state["agent_2"]]["display_name"]
     prompt = (
         f"Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_2_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
     )
-    return {"agent_1_rebuttal": _agent_invoke(state["agent_1"], prompt)}
+    return {"agent_1_rebuttal": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
 def agent_2_rebuttal_node(state: DebateState) -> dict:
-    opponent = PERSONAS[state["agent_1"]]["display_name"]
+    active_personas = _active_personas(state)
+    opponent = active_personas[state["agent_1"]]["display_name"]
     prompt = (
         f"Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_1_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
     )
-    return {"agent_2_rebuttal": _agent_invoke(state["agent_2"], prompt)}
+    return {"agent_2_rebuttal": _agent_invoke_from_state(state, state["agent_2"], prompt)}
 
 
 def agent_1_closing_node(state: DebateState) -> dict:
-    opponent = PERSONAS[state["agent_2"]]["display_name"]
+    active_personas = _active_personas(state)
+    opponent = active_personas[state["agent_2"]]["display_name"]
     prompt = (
         f"Topic: \"{state['user_input']}\"\n\n"
         f"The debate so far:\n"
@@ -76,11 +79,12 @@ def agent_1_closing_node(state: DebateState) -> dict:
         f"{opponent}'s rebuttal: \"{state['agent_2_rebuttal']}\"\n\n"
         "Give your closing argument. Summarize your core position and deliver a memorable final statement."
     )
-    return {"agent_1_closing": _agent_invoke(state["agent_1"], prompt)}
+    return {"agent_1_closing": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
 def agent_2_closing_node(state: DebateState) -> dict:
-    opponent = PERSONAS[state["agent_1"]]["display_name"]
+    active_personas = _active_personas(state)
+    opponent = active_personas[state["agent_1"]]["display_name"]
     prompt = (
         f"Topic: \"{state['user_input']}\"\n\n"
         f"The debate so far:\n"
@@ -88,12 +92,13 @@ def agent_2_closing_node(state: DebateState) -> dict:
         f"{opponent}'s rebuttal: \"{state['agent_1_rebuttal']}\"\n\n"
         "Give your closing argument. Summarize your core position and deliver a memorable final statement."
     )
-    return {"agent_2_closing": _agent_invoke(state["agent_2"], prompt)}
+    return {"agent_2_closing": _agent_invoke_from_state(state, state["agent_2"], prompt)}
 
 
 def synthesis_node(state: DebateState) -> dict:
-    a1 = PERSONAS[state["agent_1"]]["display_name"]
-    a2 = PERSONAS[state["agent_2"]]["display_name"]
+    active_personas = _active_personas(state)
+    a1 = active_personas[state["agent_1"]]["display_name"]
+    a2 = active_personas[state["agent_2"]]["display_name"]
     prompt = (
         f"You are a neutral debate moderator. Summarize the following debate on the topic:\n"
         f"\"{state['user_input']}\"\n\n"
