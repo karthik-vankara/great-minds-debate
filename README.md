@@ -41,10 +41,14 @@ User Question
 
 ```
 basics/
+├── app_state.py      # Runtime app state coordinator
+├── cli_handlers.py   # Persona/session command handlers
+├── debate_runner.py  # Debate orchestration + streaming output rendering
 ├── main.py           # Interactive CLI entry point
 ├── graph.py          # LangGraph StateGraph — all debate nodes
 ├── router.py         # LLM router with structured output
-├── personas.py       # Agent definitions (system prompts, tags, colors)
+├── personas.py       # Persona definitions + JSON-backed custom persona repository
+├── session_store.py  # JSON session persistence layer
 ├── state.py          # DebateState TypedDict
 ├── test.py           # Smoke test — verify setup before running
 ├── requirements.txt  # Python dependencies
@@ -166,6 +170,12 @@ The app now supports custom personas with JSON persistence and two debate modes:
 - `/sessions` opens the session manager (`list`, `save`, `load`, `delete`, `back`)
 - `/mode` switches between `auto` and `manual`
 - `/help` shows command help
+
+The CLI also shows the current runtime status before each prompt:
+
+- active mode
+- loaded session name
+- current persona count
 
 ### Persona Storage
 
