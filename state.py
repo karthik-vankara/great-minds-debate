@@ -1,5 +1,5 @@
 from typing import Annotated
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 from langgraph.graph.message import add_messages
 
 
@@ -24,3 +24,8 @@ class DebateState(TypedDict):
 
     # Final synthesis
     synthesis: str
+
+    # Optional dynamic persona context
+    available_personas: NotRequired[dict[str, dict]]
+    selection_mode: NotRequired[str]
+    selected_agents: NotRequired[list[str]]

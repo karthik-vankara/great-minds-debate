@@ -19,33 +19,54 @@ class RouterOutput(BaseModel):
 _router_model = os.getenv("ROUTER_MODEL", "gpt-4o-mini")
 _router_llm = ChatOpenAI(model=_router_model, temperature=0).with_structured_output(RouterOutput)
 
-_AGENT_SUMMARY = "\n".join(
-    f"- {key}: {data['display_name']} — expertise in: {', '.join(data['tags'][:6])}"
-    for key, data in PERSONAS.items()
-)
+def _build_router_system(persona_pool: dict[str, dict], agent_keys: list[str]) -> str:
+    agent_summary = "\n".join(
+        f"- {key}: {data['display_name']} — expertise in: {', '.join(data['tags'][:6])}"
+        for key, data in persona_pool.items()
+    )
 
-_ROUTER_SYSTEM = f"""You are a debate moderator. Given a user's question or idea, select the 2 most relevant agents to debate it.
+    return f"""You are a debate moderator. Given a user's question or idea, select the 2 most relevant agents to debate it.
 
 Available agents:
-{_AGENT_SUMMARY}
+{agent_summary}
 
-Return valid agent keys only from: {AGENT_KEYS}.
+Return valid agent keys only from: {agent_keys}.
 Do NOT pick the same agent twice.
 """
 
 
+def _fallback_pair(agent_keys: list[str]) -> tuple[str, str]:
+    if len(agent_keys) < 2:
+        raise ValueError("At least two personas are required for routing.")
+    return agent_keys[0], agent_keys[1]
+
+
 def route_node(state: DebateState) -> dict:
+    persona_pool = state.get("available_personas") or PERSONAS
+    active_keys = list(persona_pool.keys()) or AGENT_KEYS
+
+    if state.get("selection_mode") == "manual":
+        selected = state.get("selected_agents") or []
+        if len(selected) == 2 and selected[0] in persona_pool and selected[1] in persona_pool and selected[0] != selected[1]:
+            return {
+                "agent_1": selected[0],
+                "agent_2": selected[1],
+                "agent_1_confidence": 1.0,
+                "agent_2_confidence": 1.0,
+                "routing_reason": "Manual selection mode.",
+            }
+
     user_input = state["user_input"]
+    router_system = _build_router_system(persona_pool, active_keys)
     result: RouterOutput = _router_llm.invoke([
-        {"role": "system", "content": _ROUTER_SYSTEM},
+        {"role": "system", "content": router_system},
         {"role": "user", "content": user_input},
     ])
 
     # Validate returned keys are real
-    valid_keys = set(AGENT_KEYS)
-    if result.agent_1 not in valid_keys or result.agent_2 not in valid_keys:
-        # Fallback: pick first two
-        result.agent_1, result.agent_2 = AGENT_KEYS[0], AGENT_KEYS[1]
+    valid_keys = set(active_keys)
+    if result.agent_1 not in valid_keys or result.agent_2 not in valid_keys or result.agent_1 == result.agent_2:
+        result.agent_1, result.agent_2 = _fallback_pair(active_keys)
         result.routing_reason = "Fallback selection due to invalid router output."
 
     return {

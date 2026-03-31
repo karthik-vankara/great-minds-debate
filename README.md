@@ -152,3 +152,32 @@ Type `quit` or `exit` to stop the session.
 - Ask **philosophical questions**: *"Is simplicity always the right design goal?"*
 
 The router automatically selects the two most relevant personas — you don't need to pick them.
+
+## Dynamic Personas (New)
+
+The app now supports custom personas with JSON persistence and two debate modes:
+
+- `auto`: router picks the best two personas from the active pool
+- `manual`: you pick the two personas directly for each debate
+
+### CLI Commands
+
+- `/personas` opens the persona manager (`list`, `add`, `edit`, `delete`, `back`)
+- `/mode` switches between `auto` and `manual`
+- `/help` shows command help
+
+### Persona Storage
+
+Custom personas are stored in:
+
+```
+.debate_arena/personas/custom_personas.json
+```
+
+Built-in personas remain immutable defaults. Custom personas are overlaid on top of built-ins.
+
+### Future DB Extension
+
+Persona persistence is implemented through a repository abstraction in `personas.py`.
+This makes it straightforward to swap the JSON backend with a database backend later
+without changing router/graph debate orchestration.
