@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
+from core.prompting import build_recent_chat_context
 from personas import PERSONAS, AGENT_KEYS
 from state import DebateState
 
@@ -57,10 +58,12 @@ def route_node(state: DebateState) -> dict:
             }
 
     user_input = state["user_input"]
+    chat_context = build_recent_chat_context(state.get("chat_history"))
+    user_message = user_input if not chat_context else f"{chat_context}\n\nCurrent question:\n{user_input}"
     router_system = _build_router_system(persona_pool, active_keys)
     result: RouterOutput = _router_llm.invoke([
         {"role": "system", "content": router_system},
-        {"role": "user", "content": user_input},
+        {"role": "user", "content": user_message},
     ])
 
     # Validate returned keys are real

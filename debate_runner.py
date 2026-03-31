@@ -1,8 +1,7 @@
 from rich.panel import Panel
 from rich.rule import Rule
 
-from graph import app
-from state import DebateState
+from core.orchestration import finalize_chat_history, stream_debate_updates
 
 
 ROUND_HEADERS = {
@@ -60,26 +59,6 @@ def print_routing_header(console, state: dict, persona_pool: dict[str, dict]) ->
 
 
 def run_debate(console, user_input: str, chat_history: list, persona_pool: dict[str, dict], selection_mode: str = "auto", selected_agents: list[str] | None = None) -> list:
-    initial_state: DebateState = {
-        "user_input": user_input,
-        "chat_history": chat_history,
-        "agent_1": "",
-        "agent_2": "",
-        "agent_1_confidence": 0.0,
-        "agent_2_confidence": 0.0,
-        "routing_reason": "",
-        "agent_1_opening": "",
-        "agent_2_opening": "",
-        "agent_1_rebuttal": "",
-        "agent_2_rebuttal": "",
-        "agent_1_closing": "",
-        "agent_2_closing": "",
-        "synthesis": "",
-        "available_personas": persona_pool,
-        "selection_mode": selection_mode,
-        "selected_agents": selected_agents or [],
-    }
-
     printed_headers: set[str] = set()
     result: dict = {}
 
@@ -88,37 +67,39 @@ def run_debate(console, user_input: str, chat_history: list, persona_pool: dict[
     with console.status("", spinner="dots") as status:
         status.update(f"[dim]{NODE_LABELS['route']}[/dim]")
 
-        for event in app.stream(initial_state, stream_mode="updates"):
-            for node_name, node_output in event.items():
-                result.update(node_output)
-                status.stop()
+        for node_name, node_output, merged_result in stream_debate_updates(
+            user_input,
+            chat_history,
+            persona_pool,
+            selection_mode=selection_mode,
+            selected_agents=selected_agents,
+        ):
+            result = merged_result
+            status.stop()
 
-                if node_name == "route":
-                    print_routing_header(console, result, persona_pool)
-                elif node_name in ROUND_HEADERS:
-                    round_key, round_label = ROUND_HEADERS[node_name]
-                    if round_key not in printed_headers:
-                        console.print(Rule(round_label))
-                        printed_headers.add(round_key)
+            if node_name == "route":
+                print_routing_header(console, result, persona_pool)
+            elif node_name in ROUND_HEADERS:
+                round_key, round_label = ROUND_HEADERS[node_name]
+                if round_key not in printed_headers:
+                    console.print(Rule(round_label))
+                    printed_headers.add(round_key)
 
-                    agent_slot, round_name = node_name.rsplit("_", 1)
-                    agent_key = result.get(agent_slot)
-                    if agent_key:
-                        print_agent_panel(console, agent_key, round_name, node_output[node_name], persona_pool)
-                elif node_name == "synthesis":
-                    console.print(Rule("[bold green]Synthesis[/bold green]"))
-                    console.print(Panel(
-                        node_output["synthesis"],
-                        title="[bold green]🧠 MODERATOR SYNTHESIS[/bold green]",
-                        border_style="green",
-                    ))
+                agent_slot, round_name = node_name.rsplit("_", 1)
+                agent_key = result.get(agent_slot)
+                if agent_key:
+                    print_agent_panel(console, agent_key, round_name, node_output[node_name], persona_pool)
+            elif node_name == "synthesis":
+                console.print(Rule("[bold green]Synthesis[/bold green]"))
+                console.print(Panel(
+                    node_output["synthesis"],
+                    title="[bold green]🧠 MODERATOR SYNTHESIS[/bold green]",
+                    border_style="green",
+                ))
 
-                next_node = NEXT_NODES.get(node_name)
-                if next_node:
-                    status.update(f"[dim]{NODE_LABELS[next_node]}[/dim]")
-                    status.start()
+            next_node = NEXT_NODES.get(node_name)
+            if next_node:
+                status.update(f"[dim]{NODE_LABELS[next_node]}[/dim]")
+                status.start()
 
-    return list(chat_history) + [
-        {"role": "user", "content": user_input},
-        {"role": "assistant", "content": result.get("synthesis", "")},
-    ]
+    return finalize_chat_history(chat_history, user_input, result.get("synthesis", ""))
