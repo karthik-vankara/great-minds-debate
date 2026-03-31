@@ -380,8 +380,8 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="hero">
-        <p className="eyebrow">AI Persona Debate Arena</p>
-        <h1>Web Control Room</h1>
+        {/* <p className="eyebrow">AI Persona Debate Arena</p> */}
+        <h1>AI Persona Debate Arena</h1>
         <p className="tagline">Run the same debate engine from the browser while keeping the CLI workflow intact.</p>
         <div className="status-row">
           <span className={`status ${apiStatus}`}>API: {apiStatus}</span>
