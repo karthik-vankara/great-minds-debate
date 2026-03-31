@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
@@ -11,11 +13,13 @@ from personas import (
     remove_custom_persona,
     save_custom_persona,
 )
+from session_store import SessionStore
 from state import DebateState
 
 load_dotenv()
 
 console = Console()
+session_store = SessionStore()
 
 
 def print_agent_panel(agent_key: str, round_name: str, content: str, persona_pool: dict[str, dict]) -> None:
@@ -152,7 +156,7 @@ def main():
         "[bold]Welcome to the AI Persona Debate Arena![/bold]\n\n"
         "Ask any idea or question and watch [cyan]Steve Jobs[/cyan], [yellow]Elon Musk[/yellow], "
         "[green]Einstein[/green], and [blue]Zuckerberg[/blue] debate it.\n\n"
-        "Commands: [bold]/personas[/bold], [bold]/mode[/bold], [bold]/help[/bold].\n"
+        "Commands: [bold]/personas[/bold], [bold]/sessions[/bold], [bold]/mode[/bold], [bold]/help[/bold].\n"
         "Type [bold red]quit[/bold red] or [bold red]exit[/bold red] to stop.",
         title="[bold magenta]🎤 DEBATE ARENA[/bold magenta]",
         border_style="magenta",
@@ -160,15 +164,85 @@ def main():
 
     chat_history: list = []
     selection_mode = "auto"
+    current_session_name: str | None = None
 
     def print_help() -> None:
         console.print(Panel(
             "[bold]/personas[/bold] Manage personas (list/add/edit/delete)\n"
+            "[bold]/sessions[/bold] Manage chat sessions (list/save/load/delete)\n"
             "[bold]/mode[/bold] Switch between auto and manual selection\n"
             "[bold]/help[/bold] Show this help",
             title="[bold white]Commands[/bold white]",
             border_style="white",
         ))
+
+    def manage_sessions() -> tuple[list, str, str | None]:
+        nonlocal chat_history, selection_mode, current_session_name
+        while True:
+            console.print("\n[bold]Session Manager[/bold] - choose: list, save, load, delete, back")
+            action = console.input("session> ").strip().lower()
+            if action == "back":
+                return chat_history, selection_mode, current_session_name
+
+            if action == "list":
+                sessions = session_store.list_sessions()
+                if not sessions:
+                    console.print("[yellow]No saved sessions found.[/yellow]")
+                    continue
+                lines = [
+                    f"[bold]{item['name']}[/bold] | mode={item['selection_mode']} | messages={item['messages']} | updated={item['updated_at']}"
+                    for item in sessions
+                ]
+                console.print(Panel("\n".join(lines), title="[bold white]Saved Sessions[/bold white]", border_style="white"))
+                continue
+
+            if action == "save":
+                default_name = current_session_name or datetime.now().strftime("session_%Y%m%d_%H%M%S")
+                name = console.input(f"Session name [{default_name}]: ").strip() or default_name
+                try:
+                    saved_name = session_store.save_session(name, chat_history, selection_mode)
+                    current_session_name = saved_name
+                    console.print(f"[green]Session saved:[/green] {saved_name}")
+                except Exception as exc:
+                    console.print(f"[bold red]Failed to save session:[/bold red] {exc}")
+                continue
+
+            if action == "load":
+                name = console.input("Session name to load: ").strip()
+                if not name:
+                    console.print("[yellow]Session name is required.[/yellow]")
+                    continue
+                try:
+                    loaded = session_store.load_session(name)
+                    chat_history = loaded["chat_history"]
+                    selection_mode = loaded["selection_mode"]
+                    current_session_name = loaded["name"]
+                    console.print(
+                        f"[green]Loaded session:[/green] {current_session_name} "
+                        f"(messages={len(chat_history)}, mode={selection_mode})"
+                    )
+                except Exception as exc:
+                    console.print(f"[bold red]Failed to load session:[/bold red] {exc}")
+                continue
+
+            if action == "delete":
+                name = console.input("Session name to delete: ").strip()
+                if not name:
+                    console.print("[yellow]Session name is required.[/yellow]")
+                    continue
+                try:
+                    deleted = session_store.delete_session(name)
+                    if deleted:
+                        if current_session_name == name:
+                            current_session_name = None
+                        console.print(f"[green]Deleted session:[/green] {name}")
+                    else:
+                        console.print("[yellow]Session not found.[/yellow]")
+                except Exception as exc:
+                    console.print(f"[bold red]Failed to delete session:[/bold red] {exc}")
+                continue
+
+            console.print("[yellow]Unknown action. Use list, save, load, delete, or back.[/yellow]")
 
     def list_personas() -> None:
         active = get_active_personas()
@@ -282,6 +356,10 @@ def main():
             refresh_personas()
             continue
 
+        if user_input == "/sessions":
+            chat_history, selection_mode, current_session_name = manage_sessions()
+            continue
+
         if user_input == "/mode":
             mode = console.input("Choose mode (auto/manual): ").strip().lower()
             if mode in {"auto", "manual"}:
@@ -301,6 +379,11 @@ def main():
                 selection_mode=selection_mode,
                 selected_agents=selected_agents,
             )
+            if current_session_name:
+                try:
+                    session_store.save_session(current_session_name, chat_history, selection_mode)
+                except Exception:
+                    pass
         except Exception as e:
             console.print(f"[bold red]Error:[/bold red] {e}")
 
