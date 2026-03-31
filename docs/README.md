@@ -1,6 +1,10 @@
-# CLI Images Reference
+# AI Persona Debate Arena — Screenshots
 
-This doc provides quick visual references to the CLI feature walkthrough using the images in `images/`.
+This doc provides quick visual references for both the CLI and Web UI, using images in `images/`.
+
+---
+
+## CLI Reference
 
 ## 1. `cli-overview.png`
 ![CLI Overview](../images/cli-overview.png)
@@ -25,7 +29,7 @@ Closing arguments (Round 3) and synthesis/result view. Captures final discussion
 ## 5. `landing-page.png`
 ![Landing Page](../images/landing-page.png)
 
-Overall application landing dashboard layout showing status panels for debate controls, history, sessions, and personas. Useful for visualizing responsive UI structure and state when no active debate is running.
+Original Web UI landing dashboard layout showing status panels for debate controls, history, sessions, and personas. Useful for visualizing responsive UI structure and state when no active debate is running.
 
 ## 6. `sessions+personas.png`
 ![Sessions and Personas](../images/sessions+personas.png)
@@ -34,10 +38,24 @@ Sessions and personas management panel screenshot. Demonstrates how saved sessio
 
 ---
 
+## Web UI (Glassmorphism Redesign)
+
+## 7. `new-dashbord.png`
+![Redesigned Dashboard](../images/new-dashbord.png)
+
+Updated Web UI dashboard with glassmorphism theme — dark gradient background, frosted glass cards, animated background blobs, gradient hero title, colored dot status indicators, and responsive grid layout. Shows the debate control panel, transcript area, sessions list, and personas manager in a single view.
+
+## 8. `new-session+persona.png`
+![Redesigned Sessions and Personas](../images/new-session+persona.png)
+
+Sessions and personas management panel with the new glassmorphic styling. Demonstrates session management (load/delete) and persona creation forms with dark inputs, accent-colored focus states, and translucent list items.
+
+---
+
 ### Usage
-- Drop more CLI screenshot files into `images/` and add a corresponding section here.
+- Drop more screenshot files into `images/` and add a corresponding section here.
 - Keep the naming pattern descriptive: e.g. `step-name.png`, `round-4-final.png`.
 
 ### Notes
-- This doc is intended for quick onboarding and demo reference for CLI workflow.
+- This doc is intended for quick onboarding and demo reference for both CLI and Web UI workflows.
 - If the CLI commands or UI change, regenerate screenshots and update the captions accordingly.
