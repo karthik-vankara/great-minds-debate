@@ -26,6 +26,7 @@ def run_debate_endpoint(payload: DebateRequest, session_store: SessionStore = De
             persona_pool,
             selection_mode=payload.selection_mode,
             selected_agents=payload.selected_agents,
+            use_tools=payload.use_tools,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Debate execution failed: {exc}") from exc
@@ -66,6 +67,7 @@ def stream_debate_endpoint(payload: DebateRequest, session_store: SessionStore =
                 persona_pool,
                 selection_mode=payload.selection_mode,
                 selected_agents=payload.selected_agents,
+                use_tools=payload.use_tools,
             ):
                 if node_name == "__interrupt__":
                     # Graph paused at human_review — send waiting event

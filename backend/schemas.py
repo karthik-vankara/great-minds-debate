@@ -9,6 +9,7 @@ class DebateRequest(BaseModel):
     selection_mode: Literal["auto", "manual"] = "auto"
     selected_agents: list[str] = Field(default_factory=list)
     session_name: str | None = None
+    use_tools: bool = True
 
 
 class DebateEvent(BaseModel):

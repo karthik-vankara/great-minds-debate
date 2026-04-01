@@ -13,6 +13,7 @@ def build_initial_state(
     persona_pool: dict[str, dict],
     selection_mode: str = "auto",
     selected_agents: list[str] | None = None,
+    use_tools: bool = True,
 ) -> DebateState:
     return {
         "user_input": user_input,
@@ -31,6 +32,8 @@ def build_initial_state(
         "synthesis": "",
         "human_feedback": "",
         "skip_to_synthesis": False,
+        "tools_used": [],
+        "use_tools": use_tools,
         "available_personas": persona_pool,
         "selection_mode": selection_mode,
         "selected_agents": selected_agents or [],
@@ -43,6 +46,7 @@ def stream_debate_updates(
     persona_pool: dict[str, dict],
     selection_mode: str = "auto",
     selected_agents: list[str] | None = None,
+    use_tools: bool = True,
 ) -> Iterator[tuple[str, dict, dict]]:
     debate_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": debate_id}}
@@ -53,6 +57,7 @@ def stream_debate_updates(
         persona_pool,
         selection_mode=selection_mode,
         selected_agents=selected_agents,
+        use_tools=use_tools,
     )
 
     result: dict = {}
@@ -60,7 +65,16 @@ def stream_debate_updates(
         for node_name, node_output in event.items():
             if node_name == "__interrupt__":
                 continue  # LangGraph internal interrupt marker — skip it
-            result.update(node_output)
+            # Merge tools_used lists instead of replacing
+            if "tools_used" in node_output:
+                print(f"  [stream] {node_name} has {len(node_output['tools_used'])} tool records")
+            if "tools_used" in node_output and "tools_used" in result:
+                result["tools_used"] = result["tools_used"] + node_output["tools_used"]
+                rest = {k: v for k, v in node_output.items() if k != "tools_used"}
+                result.update(rest)
+            else:
+                result.update(node_output)
+            print(f"  [stream] result keys: {list(result.keys())}, tools_used count: {len(result.get('tools_used', []))}")
             yield node_name, node_output, dict(result)
 
     # Check if the graph was interrupted (paused at human_review)
@@ -84,7 +98,7 @@ def resume_debate_updates(
     state_snapshot = app.get_state(config)
     if state_snapshot.values:
         for key in ("agent_1", "agent_2", "agent_1_confidence", "agent_2_confidence",
-                     "routing_reason", "agent_1_opening", "agent_2_opening"):
+                     "routing_reason", "agent_1_opening", "agent_2_opening", "tools_used"):
             if key in state_snapshot.values:
                 result[key] = state_snapshot.values[key]
 
@@ -103,7 +117,13 @@ def resume_debate_updates(
         for node_name, node_output in event.items():
             if node_name == "__interrupt__":
                 continue
-            result.update(node_output)
+            # Merge tools_used lists instead of replacing
+            if "tools_used" in node_output and "tools_used" in result:
+                result["tools_used"] = result["tools_used"] + node_output["tools_used"]
+                rest = {k: v for k, v in node_output.items() if k != "tools_used"}
+                result.update(rest)
+            else:
+                result.update(node_output)
             yield node_name, node_output, dict(result)
 
 
@@ -120,6 +140,7 @@ def run_debate_orchestration(
     persona_pool: dict[str, dict],
     selection_mode: str = "auto",
     selected_agents: list[str] | None = None,
+    use_tools: bool = True,
 ) -> dict:
     events: list[dict] = []
     last_result: dict = {}
@@ -131,6 +152,7 @@ def run_debate_orchestration(
         persona_pool,
         selection_mode=selection_mode,
         selected_agents=selected_agents,
+        use_tools=use_tools,
     ):
         if node_name == "__interrupt__":
             # Auto-resume with no feedback for sync endpoint

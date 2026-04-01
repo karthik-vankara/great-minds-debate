@@ -11,9 +11,11 @@ from core.prompting import build_recent_chat_context
 from state import DebateState
 from personas import PERSONAS
 from router import route_node
+from tools import DEBATE_TOOLS
 
 _debate_model = os.getenv("DEBATE_MODEL", "gpt-4.1")
 _agent_llm = ChatOpenAI(model=_debate_model, temperature=0.5)
+_tool_llm = ChatOpenAI(model=_debate_model, temperature=0.5).bind_tools(DEBATE_TOOLS)
 _synthesis_llm = ChatOpenAI(model=_debate_model, temperature=0.3)
 
 
@@ -30,6 +32,51 @@ def _agent_invoke_from_state(state: DebateState, agent_key: str, prompt: str) ->
     return response.content.strip()
 
 
+def _agent_invoke_with_tools(
+    state: DebateState, agent_key: str, prompt: str, max_tool_calls: int = 3
+) -> tuple[str, list[dict]]:
+    """ReAct-style agent loop: LLM can call tools, get results, and respond.
+
+    Returns (final_text, tool_records) where tool_records is a list of
+    {tool, query, result} dicts for display in the UI.
+    """
+    persona = _active_personas(state)[agent_key]
+    messages = [
+        {"role": "system", "content": persona["system_prompt"]},
+        {"role": "user", "content": prompt},
+    ]
+    tool_map = {t.name: t for t in DEBATE_TOOLS}
+    tool_records: list[dict] = []
+
+    for _ in range(max_tool_calls + 1):  # +1 for the final text response
+        response = _tool_llm.invoke(messages)
+        if not response.tool_calls:
+            return response.content.strip(), tool_records
+        # Process each tool call
+        messages.append(response)
+        for tc in response.tool_calls:
+            tool_fn = tool_map.get(tc["name"])
+            if tool_fn is None:
+                result = f"Unknown tool: {tc['name']}"
+            else:
+                result = tool_fn.invoke(tc["args"])
+            print(f"  🔧 [{agent_key}] {tc['name']}({tc['args']}) → {str(result)[:120]}")
+            tool_records.append({
+                "tool": tc["name"],
+                "query": tc["args"],
+                "result": result,
+            })
+            messages.append({
+                "role": "tool",
+                "content": str(result),
+                "tool_call_id": tc["id"],
+            })
+
+    # Exhausted loop — force a final answer without tools
+    response = _agent_llm.invoke(messages)
+    return response.content.strip(), tool_records
+
+
 def _context_block(state: DebateState) -> str:
     context = build_recent_chat_context(state.get("chat_history"))
     return "" if not context else f"{context}\n\n"
@@ -44,7 +91,13 @@ def agent_1_opening_node(state: DebateState) -> dict:
     prompt = (
         f"{context}The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
+        " You may use tools to research facts before forming your argument."
     )
+    if state.get("use_tools", True):
+        text, records = _agent_invoke_with_tools(state, state["agent_1"], prompt)
+        for r in records:
+            r["node"] = "agent_1_opening"
+        return {"agent_1_opening": text, "tools_used": records}
     return {"agent_1_opening": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
@@ -53,7 +106,13 @@ def agent_2_opening_node(state: DebateState) -> dict:
     prompt = (
         f"{context}The topic for debate is:\n\n\"{state['user_input']}\"\n\n"
         "Give your opening statement on this topic. Be direct and take a clear stance."
+        " You may use tools to research facts before forming your argument."
     )
+    if state.get("use_tools", True):
+        text, records = _agent_invoke_with_tools(state, state["agent_2"], prompt)
+        for r in records:
+            r["node"] = "agent_2_opening"
+        return {"agent_2_opening": text, "tools_used": records}
     return {"agent_2_opening": _agent_invoke_from_state(state, state["agent_2"], prompt)}
 
 
@@ -95,8 +154,14 @@ def agent_1_rebuttal_node(state: DebateState) -> dict:
         f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_2_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
+        " You may use tools to research counter-arguments."
         f"{feedback}"
     )
+    if state.get("use_tools", True):
+        text, records = _agent_invoke_with_tools(state, state["agent_1"], prompt)
+        for r in records:
+            r["node"] = "agent_1_rebuttal"
+        return {"agent_1_rebuttal": text, "tools_used": records}
     return {"agent_1_rebuttal": _agent_invoke_from_state(state, state["agent_1"], prompt)}
 
 
@@ -109,8 +174,14 @@ def agent_2_rebuttal_node(state: DebateState) -> dict:
         f"{context}Topic: \"{state['user_input']}\"\n\n"
         f"{opponent} just said:\n\"{state['agent_1_opening']}\"\n\n"
         "Deliver your rebuttal. Challenge their key points directly and defend your position."
+        " You may use tools to research counter-arguments."
         f"{feedback}"
     )
+    if state.get("use_tools", True):
+        text, records = _agent_invoke_with_tools(state, state["agent_2"], prompt)
+        for r in records:
+            r["node"] = "agent_2_rebuttal"
+        return {"agent_2_rebuttal": text, "tools_used": records}
     return {"agent_2_rebuttal": _agent_invoke_from_state(state, state["agent_2"], prompt)}
 
 

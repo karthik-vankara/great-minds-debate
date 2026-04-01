@@ -123,10 +123,117 @@ app.stream(Command(resume=True), config=config, stream_mode="updates")
 
 ---
 
-## Feature 2: Tool-Using Personas
+## Feature 2: Tool-Using Personas (Wikipedia + Calculator)
 
-*Coming next...*
+### What I Built
+
+Gave debate personas access to **Wikipedia search** and a **calculator** tool so they can research real facts and compute statistics during openings and rebuttals. Added a UI toggle to enable/disable tools, and collapsible tool badges in the transcript showing what each persona researched.
+
+### LangGraph / LangChain Concepts Learned
+
+#### 1. `@tool` Decorator — Defining Tools
+- `from langchain_core.tools import tool`
+- Decorate a plain Python function with `@tool` to make it callable by an LLM
+- The function's **docstring** is critical — it's what the LLM reads to decide when to use the tool
+- The function signature (param names + types) becomes the tool's input schema automatically
+- Tools return strings — the LLM consumes the result as text context
+
+#### 2. `.bind_tools()` — Making an LLM Tool-Aware
+- `ChatOpenAI(model=...).bind_tools([tool1, tool2])` creates a new LLM instance that knows about the tools
+- The bound LLM can choose to call tools in its response via `response.tool_calls`
+- If the LLM doesn't want to use tools, `tool_calls` is empty and `response.content` has normal text
+- You need a **separate** LLM instance for tool-bound calls vs plain calls — can't toggle tools on a single instance
+
+#### 3. ReAct Pattern — Agent Loop Inside a Node
+- The ReAct (Reason + Act) loop is the core pattern for tool-using agents:
+  1. Call LLM with tools bound → get response
+  2. If response has `tool_calls` → execute tools → append results → call LLM again
+  3. Repeat until LLM returns text (no tool calls)
+  4. Return final text
+- I implemented this as an **inner loop within each node** rather than as separate graph nodes — keeps the debate graph structure clean
+- Key insight: tool usage is an **implementation detail** of how a persona builds its argument, not a separate debate stage
+
+#### 4. Tool Call Message Protocol
+- When the LLM requests a tool call, you must:
+  1. Append the LLM's response (containing tool_calls) to the message list
+  2. Execute the tool and append a message with `role: "tool"`, `content: <result>`, `tool_call_id: <id>`
+  3. The `tool_call_id` links the result back to the specific tool call — required by the API
+- This follows the OpenAI function-calling message format that LangChain wraps
+
+#### 5. `Annotated` Reducers — Handling Parallel State Writes
+- When two nodes run in parallel (e.g., agent_1_opening + agent_2_opening) and both write to the same state key, LangGraph throws: *"Can receive only one value per step"*
+- Fix: Use `Annotated[list[dict], operator.add]` as the type annotation — this tells LangGraph to **merge** lists from parallel nodes instead of replacing
+- Same pattern as `chat_history: Annotated[list, add_messages]` — reducers define how concurrent writes merge
+- Without a reducer, each key can only be written by one node per step
+
+#### 6. Tool Safety — No `eval()`
+- For the calculator, used `numexpr.evaluate()` instead of Python's `eval()` — `numexpr` only handles math expressions and cannot execute arbitrary code
+- This is an OWASP best practice — never let user-influenced strings reach `eval()`
+
+### Architecture Decisions
+
+| Decision | Why |
+|---|---|
+| ReAct loop inside nodes (not new graph nodes) | Keeps the main debate graph unchanged — tool calls are an implementation detail |
+| Max 3 tool calls per node | Prevents infinite loops if the LLM keeps wanting to research |
+| Wikipedia + Calculator only | Free, no extra API keys, sufficient for learning tool-calling patterns |
+| Openings + rebuttals use tools, closings + synthesis don't | Closings summarize existing arguments (no new research), synthesis is a neutral moderator |
+| `use_tools` toggle with default `True` | Backward compatible — tools on by default, can be disabled |
+| `tools_used` with `operator.add` reducer | Parallel opening nodes both write tool records — reducer merges them |
+| Tool records tagged with `node` field | UI can display tool badges per round (opening vs rebuttal) |
+
+### Files Changed
+
+| File | What Changed |
+|---|---|
+| `tools.py` (new) | `@tool` definitions for `wikipedia_search` and `calculator`, `DEBATE_TOOLS` list |
+| `state.py` | Added `tools_used: Annotated[list[dict], operator.add]` and `use_tools: NotRequired[bool]` |
+| `graph.py` | Added `_tool_llm` with `.bind_tools()`, `_agent_invoke_with_tools()` ReAct loop, updated opening/rebuttal nodes |
+| `core/orchestration.py` | Added `use_tools` param, initialized `tools_used: []`, fixed `tools_used` merge logic in SSE streaming |
+| `backend/schemas.py` | Added `use_tools: bool = True` to `DebateRequest` |
+| `backend/routes/debates.py` | Threaded `use_tools` through `/stream` and `/run` endpoints |
+| `frontend/src/App.jsx` | `ToolBadges` component, `useTools` state + checkbox toggle, badges in transcript + review panel |
+| `frontend/src/styles.css` | `.tool-usage`, `.tool-badge`, `.tool-result`, `.tools-toggle` styles |
+| `requirements.txt` | Added `wikipedia`, `numexpr` |
+
+### Issues Faced & Resolutions
+
+#### Issue 1: "Can receive only one value per step" — Parallel State Write Conflict
+**Error**: `At key 'tools_used': Can receive only one value per step. Use an Annotated key to handle multiple values.`
+
+**Root Cause**: `agent_1_opening` and `agent_2_opening` nodes run **in parallel** (both fan out from `route`). Both return `{"tools_used": [...]}`. LangGraph's default behavior is to assign the value, but with two concurrent writes to the same key it can't pick one.
+
+**Fix**: Changed `tools_used` from `NotRequired[list[dict]]` to `Annotated[list[dict], operator.add]` — the `operator.add` reducer tells LangGraph to concatenate the lists from parallel nodes.
+
+**Lesson**: Any state key written by parallel nodes **must** have a reducer. Use `operator.add` for lists, `add_messages` for message lists.
+
+#### Issue 2: Tool Badges Not Showing in Frontend — SSE `result.update()` Overwrites
+**Symptom**: Backend logs showed tool calls happening (🔧 lines), SSE events carried `tools_used`, but the final `DebateTranscript` rendered with no badges.
+
+**Root Cause**: Two layers of the problem:
+1. The orchestration layer's `result` dict used `result.update(node_output)` — when parallel opening nodes both emit `tools_used`, the second one's `update()` **replaces** the first's list instead of merging
+2. The `DebateTranscript` component only renders after `result.synthesis` exists (full debate complete), but during the human-review pause, the review panel was showing openings **without** `ToolBadges`
+
+**Fix**:
+1. Added merge logic in `stream_debate_updates()` and `resume_debate_updates()`: if `tools_used` already exists in `result`, concatenate instead of replace
+2. Seeded `tools_used` from the checkpoint state in `resume_debate_updates()` so rebuttal tool records get appended to opening tool records
+3. Added `<ToolBadges>` to the review panel's opening cards — so users see tool badges at the human-review pause too
+
+**Lesson**: LangGraph's state reducer (`operator.add`) only applies inside the graph. Your own result-accumulation dict outside the graph must implement the same merge logic manually.
+
+#### Issue 3: Wikipedia Disambiguation Errors
+**Symptom**: `wikipedia_search("Mars planet")` returned "No Wikipedia page found" or crashed on `DisambiguationError`.
+
+**Root Cause**: The `wikipedia` Python library's `wikipedia.summary()` with `auto_suggest=True` sometimes resolves to the wrong disambiguation page. "Mars" resolves to "Mar" (an Aramaic word) which then hits a `DisambiguationError`.
+
+**Fix**: Changed to a two-step approach: `wikipedia.search(query, results=5)` first, then iterate through results trying `wikipedia.summary(title, auto_suggest=False)` on each until one succeeds without errors.
+
+**Lesson**: Always use `wikipedia.search()` first to get valid page titles, then `summary()` with `auto_suggest=False` on the result.
+
+---
 
 ## Feature 3: Reflection Loop
+
+*Coming next...*
 
 *Coming next...*

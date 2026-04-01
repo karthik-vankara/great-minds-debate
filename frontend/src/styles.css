@@ -488,6 +488,61 @@ button.danger:hover:not(:disabled) {
   color: var(--success);
 }
 
+/* ─── Tool Usage Badges ─── */
+
+.tool-usage {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-badge {
+  font-size: 0.78rem;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.tool-badge summary {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  list-style: none;
+}
+
+.tool-badge summary::before {
+  content: "▸ ";
+}
+
+.tool-badge[open] summary::before {
+  content: "▾ ";
+}
+
+.tool-result {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.tools-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.tools-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 /* ─── Human-in-the-Loop Review Panel ─── */
 
 .review-panel {

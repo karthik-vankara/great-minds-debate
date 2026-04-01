@@ -4,3 +4,5 @@ langgraph
 rich
 fastapi
 uvicorn
+wikipedia
+numexpr

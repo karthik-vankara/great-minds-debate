@@ -1,3 +1,4 @@
+import operator
 from typing import Annotated
 from typing_extensions import NotRequired, TypedDict
 from langgraph.graph.message import add_messages
@@ -24,6 +25,10 @@ class DebateState(TypedDict):
 
     # Final synthesis
     synthesis: str
+
+    # Tool usage
+    tools_used: Annotated[list[dict], operator.add]
+    use_tools: NotRequired[bool]
 
     # Human-in-the-loop
     human_feedback: NotRequired[str]

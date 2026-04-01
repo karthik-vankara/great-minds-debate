@@ -17,6 +17,27 @@ function normalizeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function ToolBadges({ toolsUsed, node }) {
+  const nodeTools = (toolsUsed || []).filter((t) => t.node === node);
+  console.log(`[ToolBadges] node=${node}, toolsUsed length=${(toolsUsed||[]).length}, matched=${nodeTools.length}`);
+  if (nodeTools.length === 0) return null;
+  return (
+    <div className="tool-usage">
+      {nodeTools.map((t, i) => (
+        <details key={i} className="tool-badge">
+          <summary>
+            {t.tool === "wikipedia_search" ? "📖" : "🧮"}{" "}
+            {t.tool === "wikipedia_search"
+              ? `Wikipedia: ${t.query?.query || JSON.stringify(t.query)}`
+              : `Calc: ${t.query?.expression || JSON.stringify(t.query)}`}
+          </summary>
+          <p className="tool-result">{String(t.result).slice(0, 300)}</p>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function DebateTranscript({ result, personasByKey }) {
   if (!result || !result.synthesis) {
     return (
@@ -31,6 +52,7 @@ function DebateTranscript({ result, personasByKey }) {
   const a2Key = result.agent_2;
   const a1 = personasByKey[a1Key]?.data?.display_name || a1Key;
   const a2 = personasByKey[a2Key]?.data?.display_name || a2Key;
+  console.log("[DebateTranscript] tools_used:", result.tools_used);
 
   return (
     <div className="panel debate-transcript">
@@ -46,18 +68,22 @@ function DebateTranscript({ result, personasByKey }) {
         <article>
           <h4>{a1} Opening</h4>
           <p>{result.agent_1_opening}</p>
+          <ToolBadges toolsUsed={result.tools_used} node="agent_1_opening" />
         </article>
         <article>
           <h4>{a2} Opening</h4>
           <p>{result.agent_2_opening}</p>
+          <ToolBadges toolsUsed={result.tools_used} node="agent_2_opening" />
         </article>
         <article>
           <h4>{a1} Rebuttal</h4>
           <p>{result.agent_1_rebuttal}</p>
+          <ToolBadges toolsUsed={result.tools_used} node="agent_1_rebuttal" />
         </article>
         <article>
           <h4>{a2} Rebuttal</h4>
           <p>{result.agent_2_rebuttal}</p>
+          <ToolBadges toolsUsed={result.tools_used} node="agent_2_rebuttal" />
         </article>
         <article>
           <h4>{a1} Closing</h4>
@@ -125,6 +151,9 @@ export default function App() {
   const [reviewMode, setReviewMode] = useState(null); // null | { debateId, result }
   const [humanFeedback, setHumanFeedback] = useState("");
 
+  // Tool usage
+  const [useTools, setUseTools] = useState(true);
+
   const personasByKey = useMemo(
     () => Object.fromEntries(personas.map((item) => [item.key, item])),
     [personas]
@@ -190,6 +219,7 @@ export default function App() {
         selection_mode: selectionMode,
         selected_agents: selectionMode === "manual" ? selectedAgents : [],
         session_name: sessionName.trim() || null,
+        use_tools: useTools,
       };
 
       let finalResult = null;
@@ -240,6 +270,7 @@ export default function App() {
             }) : null);
           } else if (event.result) {
             // Regular debate event
+            console.log(`[SSE] node=${event.node}, tools_used=${JSON.stringify(event.result.tools_used?.length)}`);
             finalResult = event.result;
             setLastResult(event.result);
             setStreamProgress((prev) => ({
@@ -433,6 +464,7 @@ export default function App() {
           } else if (event.node === "stream_complete") {
             setStreamProgress((prev) => prev ? ({ ...prev, currentNode: "Finalizing..." }) : null);
           } else if (event.result) {
+            console.log(`[Resume SSE] node=${event.node}, tools_used=${JSON.stringify(event.result.tools_used?.length)}`);
             setLastResult(event.result);
             setStreamProgress((prev) => ({
               currentNode: event.node,
@@ -505,6 +537,16 @@ export default function App() {
                 <option value="auto">auto</option>
                 <option value="manual">manual</option>
               </select>
+            </label>
+
+            <label className="tools-toggle">
+              <input
+                type="checkbox"
+                checked={useTools}
+                onChange={(event) => setUseTools(event.target.checked)}
+                disabled={busy}
+              />
+              Use tools (Wikipedia + Calculator)
             </label>
 
             {selectionMode === "manual" ? (
@@ -584,10 +626,12 @@ export default function App() {
               <article className="review-opening-card">
                 <h4>{personasByKey[reviewMode.result.agent_1]?.data?.display_name || reviewMode.result.agent_1} — Opening</h4>
                 <p>{reviewMode.result.agent_1_opening}</p>
+                <ToolBadges toolsUsed={reviewMode.result.tools_used} node="agent_1_opening" />
               </article>
               <article className="review-opening-card">
                 <h4>{personasByKey[reviewMode.result.agent_2]?.data?.display_name || reviewMode.result.agent_2} — Opening</h4>
                 <p>{reviewMode.result.agent_2_opening}</p>
+                <ToolBadges toolsUsed={reviewMode.result.tools_used} node="agent_2_opening" />
               </article>
             </div>
 
