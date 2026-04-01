@@ -25,6 +25,11 @@ class DebateState(TypedDict):
     # Final synthesis
     synthesis: str
 
+    # Human-in-the-loop
+    human_feedback: NotRequired[str]
+    skip_to_synthesis: NotRequired[bool]
+    debate_id: NotRequired[str]
+
     # Optional dynamic persona context
     available_personas: NotRequired[dict[str, dict]]
     selection_mode: NotRequired[str]

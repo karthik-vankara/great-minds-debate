@@ -488,6 +488,64 @@ button.danger:hover:not(:disabled) {
   color: var(--success);
 }
 
+/* ─── Human-in-the-Loop Review Panel ─── */
+
+.review-panel {
+  grid-column: span 8;
+  border: 1px solid var(--accent);
+  animation: reveal 400ms ease-out both;
+}
+
+.review-openings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.review-opening-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.review-opening-card h4 {
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.review-opening-card p {
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.review-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.review-actions button.redirect {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.review-actions button.redirect:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 860px) {
+  .review-panel {
+    grid-column: 1 / -1;
+  }
+  .review-openings {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ─── History ─── */
 
 .history-list {

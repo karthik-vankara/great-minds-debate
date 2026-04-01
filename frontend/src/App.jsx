@@ -7,6 +7,7 @@ import {
   listPersonas,
   listSessions,
   loadSession,
+  resumeDebate,
   streamDebate,
   saveSession,
   upsertPersona,
@@ -120,6 +121,10 @@ export default function App() {
   const [personaTags, setPersonaTags] = useState("");
   const [personaPrompt, setPersonaPrompt] = useState("");
 
+  // Human-in-the-loop review mode
+  const [reviewMode, setReviewMode] = useState(null); // null | { debateId, result }
+  const [humanFeedback, setHumanFeedback] = useState("");
+
   const personasByKey = useMemo(
     () => Object.fromEntries(personas.map((item) => [item.key, item])),
     [personas]
@@ -199,8 +204,16 @@ export default function App() {
           } else if (event.node === "session_save_error") {
             setError(event.error || "Session save failed");
             setBusy(false);
-            setStreamProgress(null);
-          } else if (event.node === "completion") {
+            setStreamProgress(null);            } else if (event.node === "waiting_for_input") {
+              // Debate paused at human review — enter review mode
+              setLastResult(event.result);
+              setReviewMode({
+                debateId: event.debate_id,
+                result: event.result,
+              });
+              setHumanFeedback("");
+              setStreamProgress(null);
+              setBusy(false);          } else if (event.node === "completion") {
             // Save session name if returned, and update chat history
             if (event.saved_session_name) {
               setSessionName(event.saved_session_name);
@@ -209,10 +222,10 @@ export default function App() {
               setChatHistory(event.chat_history);
             }
             // Display completion message
-            setStreamProgress((prev) => ({
+            setStreamProgress((prev) => prev ? ({
               ...prev,
               currentNode: "Debate Complete ✓",
-            }));
+            }) : null);
             setBusy(false);
             setTimeout(() => {
               setStreamProgress(null);
@@ -221,10 +234,10 @@ export default function App() {
             }, 500);
           } else if (event.node === "stream_complete") {
             // Stream ended, waiting for final processing
-            setStreamProgress((prev) => ({
+            setStreamProgress((prev) => prev ? ({
               ...prev,
               currentNode: "Finalizing...",
-            }));
+            }) : null);
           } else if (event.result) {
             // Regular debate event
             finalResult = event.result;
@@ -377,6 +390,82 @@ export default function App() {
     setPersonaPrompt("");
   }
 
+  async function handleResumeDebate(feedback, skipToSynthesis) {
+    if (!reviewMode) return;
+    setError("");
+    const { debateId } = reviewMode;
+    setReviewMode(null);
+    setBusy(true);
+    setStreamProgress({ currentNode: skipToSynthesis ? "Skipping to synthesis..." : "Resuming debate...", allNodes: [] });
+
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    try {
+      const resumePayload = {
+        debate_id: debateId,
+        human_feedback: feedback,
+        skip_to_synthesis: skipToSynthesis,
+        user_input: question.trim(),
+        chat_history: chatHistory,
+        session_name: sessionName.trim() || null,
+      };
+
+      const unsubscribe = await resumeDebate(
+        resumePayload,
+        (event) => {
+          if (event.node === "error") {
+            setError(event.error || "Resume error occurred");
+            setBusy(false);
+            setStreamProgress(null);
+          } else if (event.node === "completion") {
+            if (event.saved_session_name) setSessionName(event.saved_session_name);
+            if (event.chat_history) setChatHistory(event.chat_history);
+            setStreamProgress((prev) => ({ ...prev, currentNode: "Debate Complete ✓" }));
+            setBusy(false);
+            setTimeout(() => {
+              setStreamProgress(null);
+              setQuestion("");
+              refreshCoreData();
+            }, 500);
+          } else if (event.node === "stream_complete") {
+            setStreamProgress((prev) => prev ? ({ ...prev, currentNode: "Finalizing..." }) : null);
+          } else if (event.result) {
+            setLastResult(event.result);
+            setStreamProgress((prev) => ({
+              currentNode: event.node,
+              allNodes: Array.from(new Set([...(prev?.allNodes || []), event.node])),
+            }));
+          }
+        },
+        (error) => {
+          setError(normalizeError(error));
+          setBusy(false);
+          setStreamProgress(null);
+        }
+      );
+      unsubscribeRef.current = unsubscribe;
+    } catch (err) {
+      setError(normalizeError(err));
+      setBusy(false);
+      setStreamProgress(null);
+    }
+  }
+
+  function handleContinueDebate() {
+    handleResumeDebate("", false);
+  }
+
+  function handleRedirectDebate() {
+    handleResumeDebate(humanFeedback.trim(), false);
+  }
+
+  function handleSkipToSynthesis() {
+    handleResumeDebate("", true);
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -460,7 +549,7 @@ export default function App() {
                 <p className="progress-text">
                   {streamProgress.currentNode}
                 </p>
-                {streamProgress.allNodes.length > 0 && (
+                {streamProgress.allNodes?.length > 0 && (
                   <div className="progress-nodes">
                     {streamProgress.allNodes.map((node) => (
                       <span key={node} className="node-badge">
@@ -480,6 +569,52 @@ export default function App() {
         </section>
 
         <DebateTranscript result={lastResult} personasByKey={personasByKey} />
+
+        {reviewMode ? (
+          <section className="panel review-panel">
+            <div className="panel-head">
+              <h2>Review Opening Statements</h2>
+              <span className="chip">Human-in-the-Loop</span>
+            </div>
+            <p className="muted">
+              The debate is paused. Review the openings below, then choose how to proceed.
+            </p>
+
+            <div className="review-openings">
+              <article className="review-opening-card">
+                <h4>{personasByKey[reviewMode.result.agent_1]?.data?.display_name || reviewMode.result.agent_1} — Opening</h4>
+                <p>{reviewMode.result.agent_1_opening}</p>
+              </article>
+              <article className="review-opening-card">
+                <h4>{personasByKey[reviewMode.result.agent_2]?.data?.display_name || reviewMode.result.agent_2} — Opening</h4>
+                <p>{reviewMode.result.agent_2_opening}</p>
+              </article>
+            </div>
+
+            <label>
+              Redirect feedback <span className="muted">(optional — guides the rebuttal round)</span>
+              <textarea
+                rows={3}
+                value={humanFeedback}
+                onChange={(e) => setHumanFeedback(e.target.value)}
+                placeholder="e.g. Focus more on economic impact, or challenge the data they cited..."
+                disabled={busy}
+              />
+            </label>
+
+            <div className="review-actions">
+              <button type="button" onClick={handleContinueDebate} disabled={busy}>
+                Continue ▶
+              </button>
+              <button type="button" className="redirect" onClick={handleRedirectDebate} disabled={busy || !humanFeedback.trim()}>
+                Redirect ✏️
+              </button>
+              <button type="button" className="ghost" onClick={handleSkipToSynthesis} disabled={busy}>
+                Skip to Synthesis ⏭
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         <ChatHistory chatHistory={chatHistory} />
 

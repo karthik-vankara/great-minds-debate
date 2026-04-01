@@ -23,6 +23,15 @@ class DebateResponse(BaseModel):
     saved_session_name: str | None = None
 
 
+class DebateResumeRequest(BaseModel):
+    debate_id: str = Field(min_length=1)
+    human_feedback: str = ""
+    skip_to_synthesis: bool = False
+    user_input: str = Field(min_length=1)
+    chat_history: list[dict[str, Any]] = Field(default_factory=list)
+    session_name: str | None = None
+
+
 class PersonaPayload(BaseModel):
     display_name: str
     color: str

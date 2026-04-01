@@ -74,11 +74,19 @@ export async function deleteSession(name) {
 }
 
 export async function streamDebate(body, onEvent, onError) {
+  return _streamSSE(`${API_BASE}/debates/stream`, body, onEvent, onError);
+}
+
+export async function resumeDebate(body, onEvent, onError) {
+  return _streamSSE(`${API_BASE}/debates/resume`, body, onEvent, onError);
+}
+
+async function _streamSSE(url, body, onEvent, onError) {
   /**
-   * Stream debate updates via Server-Sent Events (SSE).
-   * Uses fetch with streaming Response to handle event stream.
-   * 
-   * @param {Object} body - DebateRequest payload
+   * Generic SSE streaming helper for debate endpoints.
+   *
+   * @param {string} url - Full endpoint URL
+   * @param {Object} body - Request payload
    * @param {Function} onEvent - Callback called for each event: (eventData) => void
    * @param {Function} onError - Callback called on error: (error) => void
    * @returns {Function} Unsubscribe function to close the stream
@@ -87,7 +95,7 @@ export async function streamDebate(body, onEvent, onError) {
   let reader = null;
   
   try {
-    const response = await fetch(`${API_BASE}/debates/stream`, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
